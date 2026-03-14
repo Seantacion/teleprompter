@@ -28,18 +28,26 @@ export async function incrementUseCount(id: string): Promise<void> {
 
 export async function getScripts(category: string, level: string): Promise<ScriptEntry[]> {
   let ids: string[] = []
+  const CATEGORIES = ['introduction', 'daily', 'opinion', 'story', 'interview', 'travel', 'motivation', 'custom']
+  const LEVELS = ['beginner', 'intermediate', 'advanced']
 
   if (category === 'all' && level === 'all') {
+    // semua data
     ids = await redis.zrevrange('index:all', 0, 49)
   } else if (category !== 'all' && level === 'all') {
-    const levels = ['beginner', 'intermediate', 'advanced']
+    // kategori tertentu, semua level
     const sets = await Promise.all(
-      levels.map(l => redis.zrevrange(`index:${category}:${l}`, 0, -1))
+      LEVELS.map(l => redis.zrevrange(`index:${category}:${l}`, 0, -1))
     )
     ids = sets.flat()
   } else if (category === 'all' && level !== 'all') {
-    ids = await redis.zrevrange('index:all', 0, 49)
+    // semua kategori, level tertentu — fetch semua lalu filter
+    const sets = await Promise.all(
+      CATEGORIES.map(c => redis.zrevrange(`index:${c}:${level}`, 0, -1))
+    )
+    ids = sets.flat()
   } else {
+    // kategori + level spesifik
     ids = await redis.zrevrange(`index:${category}:${level}`, 0, 49)
   }
 
