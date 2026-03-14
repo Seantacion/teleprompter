@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Fluent — English Teleprompter',
+  title: 'Nathing — English Teleprompter',
   description: 'Practice speaking English fluently with AI-generated scripts',
 }
 
