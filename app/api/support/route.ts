@@ -10,21 +10,27 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { name, message } = await req.json()
-
-  if (!message || message.trim().length < 3) {
-    return NextResponse.json({ error: "pesan terlalu pendek" }, { status: 400 })
+    const body = await req.json()
+    console.log("payload:", JSON.stringify(body))
+  
+    const { donator_name, message, amount } = body
+    
+    if (!donator_name && !message) {
+      console.log("skipped: empty payload")
+      return NextResponse.json({ ok: true })
+    }
+  
+    const entry = {
+      id: crypto.randomUUID(),
+      name: donator_name || "Anonymous",
+      message: message || `donated Rp${Number(amount).toLocaleString("id-ID")}`,
+      createdAt: new Date().toISOString(),
+      source: "saweria",
+    }
+  
+    console.log("saving entry:", entry)
+    await redis.zadd("support:wall", Date.now(), JSON.stringify(entry))
+    console.log("saved!")
+  
+    return NextResponse.json({ ok: true })
   }
-
-  const entry = {
-    id: crypto.randomUUID(),
-    name: (name?.trim() || "Anonymous").slice(0, 32),
-    message: message.trim().slice(0, 120),
-    createdAt: new Date().toISOString(),
-  }
-
-  // ioredis: zadd(key, score, member) — beda urutan dari @upstash/redis
-  await redis.zadd("support:wall", Date.now(), JSON.stringify(entry))
-
-  return NextResponse.json(entry, { status: 201 })
-}
