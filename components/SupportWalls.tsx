@@ -1,7 +1,14 @@
 "use client"
 import { useState, useEffect } from "react"
 
-type Support = { id: string; name: string; message: string; createdAt: string }
+type Support = {
+    id: string
+    name: string
+    message: string
+    createdAt: string
+    amount?: string | null
+    source?: "saweria" | "form"
+  }
 
 export function SupportWall() {
   const [mounted, setMounted] = useState(false)
@@ -76,7 +83,14 @@ export function SupportWall() {
                   {s.name.slice(0, 2).toUpperCase()}
                 </div>
                 <div>
-                  <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.8)", margin: 0 }}>{s.name}</p>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.8)", margin: 0 }}>
+                    {s.name}
+                    {s.amount && (
+                        <span style={{ marginLeft: 6, fontSize: 10, color: "#4ade80", fontWeight: 400 }}>
+                        {s.amount}
+                        </span>
+                    )}
+                </p>
                   <p style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", margin: "2px 0 0", lineHeight: 1.5 }}>{s.message}</p>
                 </div>
               </div>

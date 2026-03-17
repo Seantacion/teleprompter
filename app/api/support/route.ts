@@ -21,12 +21,13 @@ export async function POST(req: Request) {
     }
   
     const entry = {
-      id: crypto.randomUUID(),
-      name: donator_name || "Anonymous",
-      message: message || `donated Rp${Number(amount).toLocaleString("id-ID")}`,
-      createdAt: new Date().toISOString(),
-      source: "saweria",
-    }
+        id: crypto.randomUUID(),
+        name: donator_name || "Anonymous",
+        message: message || "no message",
+        amount: amount ? `Rp${Number(amount).toLocaleString("id-ID")}` : null,
+        createdAt: new Date().toISOString(),
+        source: "saweria",
+      }
   
     console.log("saving entry:", entry)
     await redis.zadd("support:wall", Date.now(), JSON.stringify(entry))
