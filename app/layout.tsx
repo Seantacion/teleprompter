@@ -3,7 +3,7 @@ import './globals.css'
 import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
-  title: 'Nathing — English Teleprompter',
+  title: `Nathing — Let's Fluent to Speak English!`,
   description: 'Practice speaking English fluently with AI-generated scripts',
   icons: {
     icon: '/favicon.ico',

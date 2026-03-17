@@ -62,7 +62,7 @@ export function SupportWall() {
           {/* header */}
           <div style={{ padding: "14px 16px 12px", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
             <p style={{ fontSize: 13, fontWeight: 600, color: "#fff", margin: 0 }}>wall of support</p>
-            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: "2px 0 0" }}>kasih kalimat terbaikmu</p>
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", margin: "2px 0 0" }}>kasih kalimat terbaikmu, apalagi sawer hehe</p>
           </div>
 
           {/* list */}
