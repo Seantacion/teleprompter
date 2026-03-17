@@ -1,5 +1,6 @@
 'use client'
 
+import { SupportWall } from '@/components/SupportWalls'
 import { useState, useRef, useEffect, useCallback } from 'react'
 
 const CATEGORIES = [
@@ -171,8 +172,19 @@ export default function Home() {
     setPos(0)
   }
 
-  const stageH = stageRef.current?.clientHeight ?? 400
+  const [stageH, setStageH] = useState(400)
   const translateY = stageH / 2 - pos
+
+  useEffect(() => {
+    if (!stageRef.current) return
+    
+    const observer = new ResizeObserver(entries => {
+      setStageH(entries[0].contentRect.height)
+    })
+    
+    observer.observe(stageRef.current)
+    return () => observer.disconnect()
+  }, [screen])
 
   // ── Teleprompter screen ──
   if (screen === 'teleprompter') {
@@ -248,6 +260,7 @@ export default function Home() {
 
   // ── Setup screen ──
   return (
+    <>
     <div style={{ minHeight: '100svh', background: 'var(--bg)', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto', paddingBottom: 40 }}>
       {/* Header */}
       <div style={{ padding: '32px 20px 16px' }}>
@@ -321,6 +334,13 @@ export default function Home() {
             <button onClick={startTeleprompter} disabled={!script.trim()} style={{ width: '100%', padding: 14, background: script.trim() ? 'var(--surface2)' : 'var(--surface)', color: script.trim() ? 'var(--text)' : 'var(--text-dim)', border: '1px solid ' + (script.trim() ? 'var(--border-hover)' : 'var(--border)'), borderRadius: 12, fontSize: 15, fontWeight: 600, fontFamily: 'var(--font-display)', cursor: script.trim() ? 'pointer' : 'not-allowed' }}>
               Start Reading →
             </button>
+            {/* saweria */}
+            <div style={{ margin:"12px 0px", padding: "8px 16px 12px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+              <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>barangkali aja ini mah</span>
+              <a href="https://saweria.co/nathing" target="_blank" style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", textDecoration: "none", fontWeight: 600 }}>
+                saweria ↗
+              </a>
+            </div>
           </>
         )}
 
@@ -400,5 +420,7 @@ export default function Home() {
         )}
       </div>
     </div>
+    <SupportWall />
+    </>
   )
 }
