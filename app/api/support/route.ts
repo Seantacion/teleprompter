@@ -11,12 +11,10 @@ export async function GET() {
 
 export async function POST(req: Request) {
     const body = await req.json()
-    console.log("payload:", JSON.stringify(body))
   
     const { donator_name, message, amount } = body
     
     if (!donator_name && !message) {
-      console.log("skipped: empty payload")
       return NextResponse.json({ ok: true })
     }
   
@@ -29,9 +27,7 @@ export async function POST(req: Request) {
         source: "saweria",
       }
   
-    console.log("saving entry:", entry)
     await redis.zadd("support:wall", Date.now(), JSON.stringify(entry))
-    console.log("saved!")
   
     return NextResponse.json({ ok: true })
   }
