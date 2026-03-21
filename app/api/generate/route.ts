@@ -3,7 +3,7 @@ import { saveScript } from '@/lib/kv'
 import { randomUUID } from 'crypto'
 
 const CATEGORIES: Record<string, string> = {
-  introduction: 'a self-introduction monologue. The speaker introduces who they are, where they come from, what they do, and what they care about.',
+  introduction: 'a self-introduction for an English learner. The speaker introduces their name, what they do, why they are learning English, and what their goal is. Keep it grounded and relatable — not poetic or abstract.',
   daily: 'a monologue about a daily routine — morning habits, work, small moments, and how the day ends.',
   opinion: 'a monologue sharing a personal opinion on a relatable topic like technology, social media, or work-life balance.',
   story: 'a personal story monologue about a meaningful experience or lesson learned.',
@@ -17,6 +17,12 @@ const LEVEL_NOTES: Record<string, string> = {
   beginner: 'Use simple vocabulary and short sentences. Avoid complex grammar.',
   intermediate: 'Use natural everyday English with moderate vocabulary and varied sentence length.',
   advanced: 'Use rich vocabulary, idioms, rhetorical questions, and varied sentence structures.',
+  a1: 'A1 Beginner: Use only the most basic vocabulary and very short simple sentences. Present tense only.',
+  a2: 'A2 Elementary: Use simple vocabulary and basic grammar. Short sentences, common everyday words.',
+  b1: 'B1 Intermediate: Use everyday English with some variety in sentence structure. Occasional idioms are fine.',
+  b2: 'B2 Upper Intermediate: Use varied vocabulary and sentence structures. Include some idiomatic expressions.',
+  c1: 'C1 Advanced: Use sophisticated vocabulary, complex sentence structures, and natural idiomatic English.',
+  c2: 'C2 Proficient: Use near-native level English with nuanced vocabulary, complex grammar, and natural flow.',
 }
 
 export async function POST(req: NextRequest) {
@@ -43,7 +49,10 @@ Requirements:
 - First person voice
 - No headers, labels, or bullet points — just the script
 - Use ___ as placeholder where a name would go
-- Make it feel like something worth reading aloud`
+- Make it feel like something worth reading aloud
+- Avoid poetic, abstract, or overly literary language
+- Sound like a real person talking, not a writer showing off
+- Simple and direct — like talking to a camera`
 
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {

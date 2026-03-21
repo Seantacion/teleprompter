@@ -14,10 +14,19 @@ const CATEGORIES = [
   { id: 'custom', label: 'Custom Topic', emoji: '✏️' },
 ]
 
-const LEVELS = [
+const LEVELS_SIMPLE = [
   { id: 'beginner', label: 'Beginner' },
   { id: 'intermediate', label: 'Intermediate' },
   { id: 'advanced', label: 'Advanced' },
+]
+
+const LEVELS_CEFR = [
+  { id: 'a1', label: 'A1', desc: 'Beginner' },
+  { id: 'a2', label: 'A2', desc: 'Elementary' },
+  { id: 'b1', label: 'B1', desc: 'Intermediate' },
+  { id: 'b2', label: 'B2', desc: 'Upper Intermediate' },
+  { id: 'c1', label: 'C1', desc: 'Advanced' },
+  { id: 'c2', label: 'C2', desc: 'Proficient' },
 ]
 
 type Screen = 'setup' | 'teleprompter' | 'history'
@@ -55,6 +64,18 @@ export default function Home() {
   const [playing, setPlaying] = useState(false)
   const [pos, setPos] = useState(0)
   const [done, setDone] = useState(false)
+  const [levelMode, setLevelMode] = useState<'simple' | 'cefr'>('simple')
+  const [historyLevelMode, setHistoryLevelMode] = useState<'simple' | 'cefr'>('simple')
+  const [timer, setTimer] = useState(0)
+  const [favorites, setFavorites] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return []
+    return JSON.parse(localStorage.getItem('favorites') ?? '[]')
+  })
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+  const [page, setPage] = useState(1)
+  const PER_PAGE = 10
+  const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [copiedScript, setCopiedScript] = useState(false)
 
   // History
   const [historyCategory, setHistoryCategory] = useState('all')
@@ -69,6 +90,15 @@ export default function Home() {
   const lastTsRef = useRef<number>(0)
   const posRef = useRef(0)
   const playingRef = useRef(false)
+  const timerRef = useRef<NodeJS.Timeout | null>(null)
+
+  const displayedScripts = showFavoritesOnly 
+  ? historyScripts.filter(s => favorites.includes(s.id)) 
+  : historyScripts
+
+
+  const paginatedScripts = displayedScripts.slice(0, page * PER_PAGE)
+  const hasMore = displayedScripts.length > page * PER_PAGE
 
   const fetchHistory = useCallback(async (cat: string, lvl: string) => {
     setHistoryLoading(true)
@@ -141,6 +171,7 @@ export default function Home() {
       playingRef.current = false
       setPlaying(false)
       setDone(true)
+      if (timerRef.current) clearInterval(timerRef.current)
       return
     }
     animRef.current = requestAnimationFrame(animate)
@@ -156,11 +187,17 @@ export default function Home() {
     return () => cancelAnimationFrame(animRef.current)
   }, [playing, animate])
 
+  // pas togglePlay, tambah logic timer
   const togglePlay = () => {
     const next = !playing
     playingRef.current = next
     setPlaying(next)
-    if (next) lastTsRef.current = 0
+    if (next) {
+      lastTsRef.current = 0
+      timerRef.current = setInterval(() => setTimer(t => t + 1), 1000)
+    } else {
+      if (timerRef.current) clearInterval(timerRef.current)
+    }
   }
 
   const resetScroll = () => {
@@ -170,6 +207,22 @@ export default function Home() {
     setDone(false)
     posRef.current = 0
     setPos(0)
+    if (timerRef.current) clearInterval(timerRef.current)
+    setTimer(0)
+  }
+
+  const toggleFavorite = (id: string) => {
+    setFavorites(prev => {
+      const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
+      localStorage.setItem('favorites', JSON.stringify(next))
+      return next
+    })
+  }
+
+  const handleCopy = (text: string, id: string) => {
+    navigator.clipboard.writeText(text)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 1500)
   }
 
   const [stageH, setStageH] = useState(400)
@@ -186,6 +239,16 @@ export default function Home() {
     return () => observer.disconnect()
   }, [screen])
 
+  const getReadingTime = (text: string) => {
+    const words = text.trim().split(/\s+/).filter(Boolean).length
+    const seconds = Math.round((words / 130) * 60)
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return { words, duration: m > 0 ? `~${m}m ${s}s` : `~${s}s` }
+  }
+
+  useEffect(() => { setPage(1) }, [historyCategory, historyLevel, showFavoritesOnly])
+
   // ── Teleprompter screen ──
   if (screen === 'teleprompter') {
     return (
@@ -195,7 +258,14 @@ export default function Home() {
             ← Back
           </button>
           <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em' }}>NATHING</span>
-          <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>{Math.round((pos / getTotalHeight()) * 100)}%</span>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
+              {String(Math.floor(timer / 60)).padStart(2, '0')}:{String(timer % 60).padStart(2, '0')}
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+              {Math.round((pos / getTotalHeight()) * 100)}%
+            </span>
+          </div>
         </div>
 
         <div ref={stageRef} style={{ flex: 1, overflow: 'hidden', position: 'relative', cursor: playing ? 'none' : 'default' }} onClick={togglePlay}>
@@ -302,12 +372,33 @@ export default function Home() {
             )}
 
             <div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>DIFFICULTY</div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                {LEVELS.map(l => (
-                  <button key={l.id} onClick={() => setLevel(l.id)} style={{ ...btn(level === l.id), flex: 1, padding: 9, fontSize: 13 }}>{l.label}</button>
-                ))}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em' }}>DIFFICULTY</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, color: levelMode === 'simple' ? 'var(--accent)' : 'var(--text-dim)' }}>Simple</span>
+                  <div onClick={() => { setLevelMode(m => m === 'simple' ? 'cefr' : 'simple'); setLevel(levelMode === 'simple' ? 'b1' : 'intermediate') }}
+                    style={{ width: 36, height: 20, borderRadius: 999, background: levelMode === 'cefr' ? 'var(--accent)' : 'var(--surface2)', border: '1px solid var(--border)', cursor: 'pointer', position: 'relative', transition: 'background 0.2s' }}>
+                    <div style={{ position: 'absolute', top: 2, left: levelMode === 'cefr' ? 18 : 2, width: 14, height: 14, borderRadius: '50%', background: levelMode === 'cefr' ? '#0c0c0e' : 'var(--text-muted)', transition: 'left 0.2s' }} />
+                  </div>
+                  <span style={{ fontSize: 11, color: levelMode === 'cefr' ? 'var(--accent)' : 'var(--text-dim)' }}>CEFR</span>
+                </div>
               </div>
+              {levelMode === 'simple' ? (
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {LEVELS_SIMPLE.map(l => (
+                    <button key={l.id} onClick={() => setLevel(l.id)} style={{ ...btn(level === l.id), flex: 1, padding: 9, fontSize: 13 }}>{l.label}</button>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+                  {LEVELS_CEFR.map(l => (
+                    <button key={l.id} onClick={() => setLevel(l.id)} style={{ ...btn(level === l.id), padding: '8px 4px', fontSize: 13, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                      <span style={{ fontWeight: 700 }}>{l.label}</span>
+                      <span style={{ fontSize: 10, opacity: 0.7 }}>{l.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             <button onClick={generateScript} disabled={generating || (category === 'custom' && !customPrompt.trim())} style={{ width: '100%', padding: 14, background: generating ? 'var(--surface2)' : 'var(--accent)', color: generating ? 'var(--text-muted)' : '#0c0c0e', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, fontFamily: 'var(--font-display)', cursor: generating ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -320,7 +411,12 @@ export default function Home() {
               <div className="animate-fadeUp">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                   <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em' }}>SCRIPT</div>
-                  <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>{script.split(/\s+/).length} words</span>
+                  {script && (
+                    <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-dim)' }}>
+                      <span>{getReadingTime(script).words} words</span>
+                      <span>{getReadingTime(script).duration} to speak</span>
+                    </div>
+                  )}
                 </div>
                 <textarea value={script} onChange={e => setScript(e.target.value)} rows={8} style={{ width: '100%', padding: 14, fontSize: 14, lineHeight: 1.7, resize: 'vertical' }} />
               </div>
@@ -331,9 +427,15 @@ export default function Home() {
               </div>
             )}
 
-            <button onClick={startTeleprompter} disabled={!script.trim()} style={{ width: '100%', padding: 14, background: script.trim() ? 'var(--surface2)' : 'var(--surface)', color: script.trim() ? 'var(--text)' : 'var(--text-dim)', border: '1px solid ' + (script.trim() ? 'var(--border-hover)' : 'var(--border)'), borderRadius: 12, fontSize: 15, fontWeight: 600, fontFamily: 'var(--font-display)', cursor: script.trim() ? 'pointer' : 'not-allowed' }}>
-              Start Reading →
-            </button>
+            
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={() => { navigator.clipboard.writeText(script); setCopiedScript(true); setTimeout(() => setCopiedScript(false), 1500) }} style={{ ...btn(false), padding: 14, fontSize: 15 }}>
+                {copiedScript ? 'Copied!' : 'Copy'}
+              </button>
+              <button onClick={startTeleprompter} disabled={!script.trim()} style={{ flex: 1, padding: 14, background: script.trim() ? 'var(--surface2)' : 'var(--surface)', color: script.trim() ? 'var(--text)' : 'var(--text-dim)', border: '1px solid ' + (script.trim() ? 'var(--border-hover)' : 'var(--border)'), borderRadius: 12, fontSize: 15, fontWeight: 600, fontFamily: 'var(--font-display)', cursor: script.trim() ? 'pointer' : 'not-allowed' }}>
+                Start Reading →
+              </button>
+            </div>
             {/* saweria */}
             <div style={{ margin:"12px 0px", padding: "8px 16px 12px", borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
               <span style={{ fontSize: 11, color: "rgba(255,255,255,0.25)" }}>barangkali aja ini mah</span>
@@ -348,38 +450,48 @@ export default function Home() {
         {activeTab === 'history' && (
           <>
             {/* Filter by category */}
-            <div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>CATEGORY</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {[{ id: 'all', label: 'All', emoji: '🗂️' }, ...CATEGORIES].map(cat => (
-                  <button key={cat.id} onClick={() => setHistoryCategory(cat.id)} style={{ ...btn(historyCategory === cat.id), padding: '7px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 14 }}>{cat.emoji}</span>{cat.label}
-                  </button>
-                ))}
-              </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {[{ id: 'all', label: 'All', emoji: '🗂️' }, ...CATEGORIES].map(cat => (
+                <button key={cat.id} onClick={() => setHistoryCategory(cat.id)} style={{ ...btn(historyCategory === cat.id), padding: '7px 12px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 14 }}>{cat.emoji}</span>{cat.label}
+                </button>
+              ))}
             </div>
 
             {/* Filter by level */}
             <div>
-              <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 10 }}>LEVEL</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em' }}>LEVEL</div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, color: historyLevelMode === 'simple' ? 'var(--accent)' : 'var(--text-dim)' }}>Simple</span>
+                  <div onClick={() => { setHistoryLevelMode(m => m === 'simple' ? 'cefr' : 'simple'); setHistoryLevel('all') }}
+                    style={{ width: 36, height: 20, borderRadius: 999, background: historyLevelMode === 'cefr' ? 'var(--accent)' : 'var(--surface2)', border: '1px solid var(--border)', cursor: 'pointer', position: 'relative', transition: 'background 0.2s' }}>
+                    <div style={{ position: 'absolute', top: 2, left: historyLevelMode === 'cefr' ? 18 : 2, width: 14, height: 14, borderRadius: '50%', background: historyLevelMode === 'cefr' ? '#0c0c0e' : 'var(--text-muted)', transition: 'left 0.2s' }} />
+                  </div>
+                  <span style={{ fontSize: 11, color: historyLevelMode === 'cefr' ? 'var(--accent)' : 'var(--text-dim)' }}>CEFR</span>
+                </div>
+              </div>
               <div style={{ display: 'flex', gap: 8 }}>
-                {[{ id: 'all', label: 'All' }, ...LEVELS].map(l => (
+                {[{ id: 'all', label: 'All' }, ...(historyLevelMode === 'simple' ? LEVELS_SIMPLE : LEVELS_CEFR)].map(l => (
                   <button key={l.id} onClick={() => setHistoryLevel(l.id)} style={{ ...btn(historyLevel === l.id), flex: 1, padding: 9, fontSize: 13 }}>{l.label}</button>
                 ))}
+                <button onClick={() => setShowFavoritesOnly(f => !f)} style={{ ...btn(showFavoritesOnly), padding: '7px 12px', fontSize: 12, alignSelf: 'flex-start' }}>
+                  ★ Favorites only
+                </button>
               </div>
             </div>
 
             {/* Script list */}
             {historyLoading ? (
               <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-dim)', fontSize: 14 }}>Loading...</div>
-            ) : historyScripts.length === 0 ? (
+            ) : displayedScripts.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '40px 0', color: 'var(--text-dim)', fontSize: 14 }}>
                 No scripts yet for this filter.<br />
                 <span style={{ fontSize: 12 }}>Generate one first!</span>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {historyScripts.map(entry => {
+                {paginatedScripts.map(entry => {
                   const catInfo = CATEGORIES.find(c => c.id === entry.category)
                   const expanded = expandedId === entry.id
                   const preview = entry.script.slice(0, 100) + (entry.script.length > 100 ? '…' : '')
@@ -401,11 +513,20 @@ export default function Home() {
                       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                         {expanded ? entry.script : preview}
                       </p>
+                      <div style={{ fontSize: 11, color: 'var(--text-dim)' }}>
+                        {getReadingTime(entry.script).words} words · {getReadingTime(entry.script).duration}
+                      </div>
 
                       {/* Actions */}
                       <div style={{ display: 'flex', gap: 8 }}>
+                        <button onClick={() => toggleFavorite(entry.id)} style={{ ...btn(favorites.includes(entry.id)), padding: '7px 10px', fontSize: 14 }}>
+                          {favorites.includes(entry.id) ? '★' : '☆'}
+                        </button>
                         <button onClick={() => setExpandedId(expanded ? null : entry.id)} style={{ ...btn(false), padding: '7px 12px', fontSize: 12 }}>
                           {expanded ? 'Collapse' : 'Read more'}
+                        </button>
+                        <button onClick={() => handleCopy(entry.script, entry.id)} style={{ ...btn(false), padding: '7px 10px', fontSize: 12 }}>
+                          {copiedId === entry.id ? 'Copied!' : 'Copy'}
                         </button>
                         <button onClick={() => loadFromHistory(entry)} style={{ ...btn(true), padding: '7px 12px', fontSize: 12, flex: 1 }}>
                           Use this script →
@@ -414,6 +535,11 @@ export default function Home() {
                     </div>
                   )
                 })}
+                {hasMore && (
+                  <button onClick={() => setPage(p => p + 1)} style={{ ...btn(false), width: '100%', padding: '10px', fontSize: 13 }}>
+                    Load more
+                  </button>
+                )}
               </div>
             )}
           </>
