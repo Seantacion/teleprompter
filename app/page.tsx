@@ -2,6 +2,7 @@
 
 import { SupportWall } from '@/components/SupportWalls'
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useSession, signOut, signIn } from 'next-auth/react'
 
 const CATEGORIES = [
   { id: 'introduction', label: 'Self Introduction', emoji: '👋' },
@@ -29,6 +30,9 @@ const LEVELS_CEFR = [
   { id: 'c2', label: 'C2', desc: 'Proficient' },
 ]
 
+const PRESET_AVATARS = ['🐻', '🦊', '🐼', '🦁', '🐯', '🐨', '🦉', '🐸', '🐙', '🦋', '🌊', '🔥']
+const PRESET_COLORS = ['#d4f564', '#94a3b8', '#a78bfa', '#38bdf8', '#fb923c', '#4ade80']
+
 type Screen = 'setup' | 'teleprompter' | 'history'
 
 type ScriptEntry = {
@@ -38,6 +42,7 @@ type ScriptEntry = {
   level: string
   createdAt: number
   useCount: number
+  userName?: string
 }
 
 const btn = (active: boolean, accent = false) => ({
@@ -67,15 +72,14 @@ export default function Home() {
   const [levelMode, setLevelMode] = useState<'simple' | 'cefr'>('simple')
   const [historyLevelMode, setHistoryLevelMode] = useState<'simple' | 'cefr'>('simple')
   const [timer, setTimer] = useState(0)
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    if (typeof window === 'undefined') return []
-    return JSON.parse(localStorage.getItem('favorites') ?? '[]')
-  })
+  const [favorites, setFavorites] = useState<string[]>([])
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [page, setPage] = useState(1)
   const PER_PAGE = 10
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [copiedScript, setCopiedScript] = useState(false)
+
+  const { data: session, update } = useSession()
 
   // History
   const [historyCategory, setHistoryCategory] = useState('all')
@@ -92,10 +96,43 @@ export default function Home() {
   const playingRef = useRef(false)
   const timerRef = useRef<NodeJS.Timeout | null>(null)
 
+  const [limitReached, setLimitReached] = useState(false)
+
   const displayedScripts = showFavoritesOnly 
   ? historyScripts.filter(s => favorites.includes(s.id)) 
   : historyScripts
 
+  // Auth
+  const [showAuth, setShowAuth] = useState(false)
+  const [authMode, setAuthMode] = useState<'signin' | 'register'>('signin')
+  const [authName, setAuthName] = useState('')
+  const [authEmail, setAuthEmail] = useState('')
+  const [authPassword, setAuthPassword] = useState('')
+  const [authError, setAuthError] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+
+  // Profile
+  const [showProfile, setShowProfile] = useState(false)
+  const [profileName, setProfileName] = useState('')
+  const [profilePassword, setProfilePassword] = useState('')
+  const [profileNewPassword, setProfileNewPassword] = useState('')
+  const [profileAvatar, setProfileAvatar] = useState('')
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileError, setProfileError] = useState('')
+  const [profileSuccess, setProfileSuccess] = useState(false)
+  const [userAvatar, setUserAvatar] = useState<string>(() => {
+    if (typeof window === 'undefined') return ''
+    return localStorage.getItem(`avatar:${session?.user?.id}`) ?? ''
+  })
+  const [profileColor, setProfileColor] = useState('#d4f564')
+  const [userColor, setUserColor] = useState('#d4f564')
+
+  // Streak
+  const [streak, setStreak] = useState(0)
+  const streakCalledRef = useRef(false)
+  const [longestStreak, setLongestStreak] = useState(0)
+  const [streakLost, setStreakLost] = useState(false)
+  const [prevStreak, setPrevStreak] = useState(0)
 
   const paginatedScripts = displayedScripts.slice(0, page * PER_PAGE)
   const hasMore = displayedScripts.length > page * PER_PAGE
@@ -135,6 +172,12 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ category, customPrompt, level }),
       })
+
+      if (res.status === 429) {
+        setLimitReached(true)
+        setGenerating(false)
+        return
+      }
       const data = await res.json()
       setScript(data.script)
     } catch {
@@ -149,6 +192,7 @@ export default function Home() {
     setPos(0)
     setDone(false)
     setPlaying(false)
+    streakCalledRef.current = false
     playingRef.current = false
     setScreen('teleprompter')
   }
@@ -173,6 +217,14 @@ export default function Home() {
       setDone(true)
       if (timerRef.current) clearInterval(timerRef.current)
       return
+    }
+    // streak trigger pas 50%
+    const progress = posRef.current / getTotalHeight()
+    if (progress >= 0.5 && !streakCalledRef.current && session?.user?.id) {
+      streakCalledRef.current = true
+      fetch('/api/streak', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => { setStreak(d.streak); setLongestStreak(d.longest) })
     }
     animRef.current = requestAnimationFrame(animate)
   }, [speed, getTotalHeight])
@@ -202,6 +254,7 @@ export default function Home() {
 
   const resetScroll = () => {
     cancelAnimationFrame(animRef.current)
+    streakCalledRef.current = false
     playingRef.current = false
     setPlaying(false)
     setDone(false)
@@ -212,11 +265,21 @@ export default function Home() {
   }
 
   const toggleFavorite = (id: string) => {
-    setFavorites(prev => {
-      const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
-      localStorage.setItem('favorites', JSON.stringify(next))
-      return next
-    })
+    if (session?.user?.id) {
+      fetch('/api/favorites', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+        .then(r => r.json())
+        .then(d => setFavorites(d.favorites))
+    } else {
+      setFavorites(prev => {
+        const next = prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]
+        localStorage.setItem('favorites', JSON.stringify(next))
+        return next
+      })
+    }
   }
 
   const handleCopy = (text: string, id: string) => {
@@ -224,6 +287,79 @@ export default function Home() {
     setCopiedId(id)
     setTimeout(() => setCopiedId(null), 1500)
   }
+
+  const handleAuth = async () => {
+    setAuthError('')
+    setAuthLoading(true)
+  
+    if (authMode === 'register') {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: authName, email: authEmail, password: authPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) { setAuthError(data.error); setAuthLoading(false); return }
+    }
+  
+    const result = await signIn('credentials', {
+      email: authEmail, password: authPassword, redirect: false,
+    })
+  
+    setAuthLoading(false)
+    if (result?.error) { setAuthError('Invalid email or password'); return }
+    setShowAuth(false)
+  }
+
+  const saveProfile = async () => {
+    setProfileSaving(true)
+    setProfileError('')
+    setProfileSuccess(false)
+  
+    const res = await fetch('/api/auth/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: profileName,
+        password: profilePassword,
+        newPassword: profileNewPassword,
+        image: profileAvatar || undefined,
+      }),
+    })
+  
+    const data = await res.json()
+    setProfileSaving(false)
+    if (!res.ok) { setProfileError(data.error); return }
+    setProfileSuccess(true)
+    if (profileAvatar) {
+      localStorage.setItem(`avatar:${session?.user?.id}`, profileAvatar)
+      setUserAvatar(profileAvatar)
+      localStorage.setItem(`color:${session?.user?.id}`, profileColor)
+      setUserColor(profileColor)
+    }
+    await update({ image: profileAvatar || undefined, name: profileName })
+    setTimeout(() => setProfileSuccess(false), 2000)
+  }
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      fetch('/api/favorites')
+        .then(r => r.json())
+        .then(d => setFavorites(d.favorites))
+    } else {
+      const saved = localStorage.getItem('favorites')
+      if (saved) setFavorites(JSON.parse(saved))
+    }
+  }, [session?.user?.id])
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      const saved = localStorage.getItem(`avatar:${session.user.id}`)
+      if (saved) setUserAvatar(saved)
+      const savedColor = localStorage.getItem(`color:${session.user.id}`) // tambahin ini
+      if (savedColor) setUserColor(savedColor)       
+    }
+  }, [session?.user?.id])
 
   const [stageH, setStageH] = useState(400)
   const translateY = stageH / 2 - pos
@@ -238,6 +374,21 @@ export default function Home() {
     observer.observe(stageRef.current)
     return () => observer.disconnect()
   }, [screen])
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      fetch('/api/streak')
+        .then(r => r.json())
+        .then(d => {
+          setStreak(d.streak)
+          setLongestStreak(d.longest)
+          setPrevStreak(d.prevStreak ?? 0)
+          if (d.prevStreak > 1 && d.streak === 1 && d.wasReset) {
+            setStreakLost(true)
+          }
+        })
+    }
+  }, [session?.user?.id])
 
   const getReadingTime = (text: string) => {
     const words = text.trim().split(/\s+/).filter(Boolean).length
@@ -262,6 +413,11 @@ export default function Home() {
             <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)' }}>
               {String(Math.floor(timer / 60)).padStart(2, '0')}:{String(timer % 60).padStart(2, '0')}
             </span>
+            {session && streak > 0 && (
+              <span style={{ fontSize: 11, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>
+                🔥 {streak}
+              </span>
+            )}
             <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>
               {Math.round((pos / getTotalHeight()) * 100)}%
             </span>
@@ -331,12 +487,82 @@ export default function Home() {
   // ── Setup screen ──
   return (
     <>
+    {limitReached && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 20px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '28px 24px', maxWidth: 360, width: '100%', display: 'flex', flexDirection: 'column', gap: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 36 }}>⚡</div>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Daily limit reached</div>
+            <div style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+            {session 
+              ? "You've used all 25 generations for today. Come back tomorrow or browse History for existing scripts." 
+              : "You've used all 5 free generations for today. Sign in to get 25/day, browse scripts in History, or write your own in the script box."}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {!session && (
+              <button onClick={() => { setLimitReached(false); setShowAuth(true) }} style={{ display: 'block', width: '100%', padding: '12px', background: 'var(--accent)', color: '#0c0c0e', borderRadius: 10, fontSize: 14, fontWeight: 700, border: 'none', fontFamily: 'var(--font-display)', cursor: 'pointer' }}>
+                Sign in / Register
+              </button>
+            )}
+            <button onClick={() => setLimitReached(false)} style={{ padding: '11px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, color: 'var(--text-muted)', fontFamily: 'var(--font-display)', cursor: 'pointer' }}>
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <div style={{ minHeight: '100svh', background: 'var(--bg)', display: 'flex', flexDirection: 'column', maxWidth: 480, margin: '0 auto', paddingBottom: 40 }}>
       {/* Header */}
       <div style={{ padding: '32px 20px 16px' }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', letterSpacing: '0.15em', marginBottom: 8 }}>NATHING</div>
-        <h1 style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, letterSpacing: '-0.02em' }}>Speak <br />English Freely</h1>
+        <div className='flex justify-between'>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--accent)', letterSpacing: '0.15em', marginBottom: 8 }}>NATHING</div>
+          {session ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              {session && streak > 0 && (
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', borderRadius: 999, padding: '3px 10px' }}>
+                  <span style={{ fontSize: 13 }}>🔥</span>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', fontFamily: 'var(--font-mono)' }}>{streak}</span>
+                </div>
+              )}
+              <div onClick={() => { 
+                  setProfileName(session.user?.name ?? '')
+                  setProfileAvatar(userAvatar)
+                  setProfileColor(userColor)
+                  setShowProfile(true)  
+                }}
+                style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--accent)', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', overflow: 'hidden' }}>
+                {userAvatar
+                  ? userAvatar.startsWith('http') || userAvatar.startsWith('data')
+                    ? <img src={userAvatar} width={32} height={32} style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer" />
+                    : <span style={{ fontSize: 18 }}>{userAvatar}</span>
+                  : session.user?.image
+                    ? <img src={session.user.image} width={32} height={32} style={{ width: '100%', height: '100%', objectFit: 'cover' }} referrerPolicy="no-referrer" />
+                    : <span style={{ fontSize: 14, fontWeight: 700, color: '#0c0c0e' }}>{(session.user?.name?.[0] ?? '?').toUpperCase()}</span>
+                }
+              </div>
+            </div>
+          ) : (
+            <span onClick={() => setShowAuth(true)} style={{ fontSize: 13, color: 'var(--accent)', cursor: 'pointer' }}>
+              Sign in →
+            </span>
+          )}
+        </div>
+        <h1 style={{ fontSize: 28, fontWeight: 800, lineHeight: 1.1, letterSpacing: '-0.02em' }}>
+          {session ? (() => {
+            const hour = new Date().getHours()
+            const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+            const name = session.user?.name?.split(' ')[0] ?? 'there'
+            return <>
+              <span style={{ fontSize: 22, fontWeight: 800 }}>{greeting},</span>
+              <br />
+              {name}.
+            </>
+          })() : <>Speak<br />English Freely</>}
+        </h1>
         <p style={{ marginTop: 8, fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.5 }}>Practice speaking English fluently.</p>
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -503,12 +729,20 @@ export default function Home() {
                           <span style={{ fontSize: 13 }}>{catInfo?.emoji}</span>
                           <span style={{ fontSize: 12, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid var(--accent-border)', borderRadius: 999, padding: '2px 8px' }}>{catInfo?.label ?? entry.category}</span>
                           <span style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--surface2)', borderRadius: 999, padding: '2px 8px', textTransform: 'capitalize' }}>{entry.level}</span>
+                          {entry.userName && (
+                            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>by {entry.userName}</span>
+                          )}
                         </div>
                         <span style={{ fontSize: 11, color: 'var(--text-dim)', fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap' }}>
-                          {entry.useCount > 0 ? `▶ ${entry.useCount}x` : 'new'}
+                          {(() => {
+                            const diff = Date.now() - entry.createdAt
+                            const hours = Math.floor(diff / 3600000)
+                            if (hours < 1) return 'just now'
+                            if (hours < 24) return `${hours}h ago`
+                            return new Date(entry.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+                          })()}
                         </span>
                       </div>
-
                       {/* Preview / full */}
                       <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>
                         {expanded ? entry.script : preview}
@@ -546,6 +780,172 @@ export default function Home() {
         )}
       </div>
     </div>
+    {showAuth && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 20px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '28px 24px', maxWidth: 380, width: '100%', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>{authMode === 'signin' ? 'Welcome back' : 'Create account'}</div>
+            <button onClick={() => setShowAuth(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 20, cursor: 'pointer', fontFamily: 'var(--font-display)' }}>×</button>
+          </div>
+
+          <button onClick={() => signIn('google', { callbackUrl: '/' })} style={{ width: '100%', padding: 11, background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 10, fontSize: 14, color: 'var(--text)', fontFamily: 'var(--font-display)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <svg width="16" height="16" viewBox="0 0 18 18"><path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844c-.209 1.125-.843 2.078-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/><path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.184l-2.908-2.258c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.964 10.707A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.707V4.961H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.039l3.007-2.332z"/><path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.961L3.964 6.293C4.672 4.166 6.656 3.58 9 3.58z"/></svg>
+            Continue with Google
+          </button>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+            <span style={{ fontSize: 11, color: 'var(--text-dim)' }}>or</span>
+            <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+          </div>
+
+          {authMode === 'register' && (
+            <input value={authName} onChange={e => setAuthName(e.target.value)} placeholder="Full name" style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 10 }} />
+          )}
+          <input value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="Email" type="email" style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 10 }} />
+          <input value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="Password" type="password" style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 10 }} />
+
+          {authError && <div style={{ fontSize: 13, color: 'var(--red)' }}>{authError}</div>}
+
+          <button onClick={handleAuth} disabled={authLoading} style={{ width: '100%', padding: 12, background: 'var(--accent)', color: '#0c0c0e', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-display)', cursor: authLoading ? 'not-allowed' : 'pointer', opacity: authLoading ? 0.7 : 1 }}>
+            {authLoading ? 'Please wait...' : authMode === 'signin' ? 'Sign in' : 'Create account'}
+          </button>
+
+          <div style={{ textAlign: 'center', fontSize: 13, color: 'var(--text-muted)' }}>
+            {authMode === 'signin' ? "Don't have an account? " : 'Already have an account? '}
+            <span onClick={() => { setAuthMode(m => m === 'signin' ? 'register' : 'signin'); setAuthError('') }} style={{ color: 'var(--accent)', cursor: 'pointer' }}>
+              {authMode === 'signin' ? 'Register' : 'Sign in'}
+            </span>
+          </div>
+        </div>
+      </div>
+    )}
+    {showProfile && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 20px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '28px 24px', maxWidth: 380, width: '100%', display: 'flex', flexDirection: 'column', gap: 16, maxHeight: '90svh', overflowY: 'auto' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>Edit Profile</div>
+            <button onClick={() => setShowProfile(false)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', fontSize: 20, cursor: 'pointer' }}>×</button>
+          </div>
+
+          {/* Avatar preview */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <div style={{ width: 56, height: 56, borderRadius: '50%', background: profileColor, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 28, overflow: 'hidden' }}>
+              {profileAvatar
+                ? profileAvatar.startsWith('http') || profileAvatar.startsWith('data')
+                  ? <img src={profileAvatar} width={56} height={56} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                  : <span>{profileAvatar}</span>
+                : <span style={{ fontSize: 14, fontWeight: 700, color: '#0c0c0e' }}>{(session?.user?.name?.[0] ?? '?').toUpperCase()}</span>
+              }
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              <div style={{ fontWeight: 600, color: 'var(--text)' }}>{session?.user?.name}</div>
+              <div>{session?.user?.email}</div>
+            </div>
+          </div>
+
+          {/* Preset emoji */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 8 }}>PICK AVATAR</div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {PRESET_AVATARS.map(a => (
+                <button key={a} onClick={() => setProfileAvatar(a)} style={{ width: 36, height: 36, borderRadius: 8, border: '1px solid ' + (profileAvatar === a ? 'var(--accent)' : 'var(--border)'), background: profileAvatar === a ? 'var(--accent-dim)' : 'var(--surface2)', fontSize: 20, cursor: 'pointer' }}>
+                  {a}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Preset Colors */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 8 }}>AVATAR COLOR</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {PRESET_COLORS.map(c => (
+                <div key={c} onClick={() => setProfileColor(c)} style={{ width: 28, height: 28, borderRadius: '50%', background: c, cursor: 'pointer', border: profileColor === c ? '2px solid var(--text)' : '2px solid transparent' }} />
+              ))}
+            </div>
+          </div>
+
+          {/* Upload image */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 8 }}>OR UPLOAD PHOTO</div>
+            <input type="file" accept="image/*" onChange={async e => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              
+              // compress via canvas
+              const img = new Image()
+              const url = URL.createObjectURL(file)
+              img.onload = () => {
+                const canvas = document.createElement('canvas')
+                const MAX = 100
+                const ratio = Math.min(MAX / img.width, MAX / img.height)
+                canvas.width = img.width * ratio
+                canvas.height = img.height * ratio
+                canvas.getContext('2d')?.drawImage(img, 0, 0, canvas.width, canvas.height)
+                const compressed = canvas.toDataURL('image/jpeg', 0.7)
+                setProfileAvatar(compressed)
+                URL.revokeObjectURL(url)
+              }
+              img.src = url
+            }} style={{ width: '100%', fontSize: 13, color: 'var(--text-muted)' }} />
+          </div>
+
+          {/* Name */}
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em', marginBottom: 8 }}>DISPLAY NAME</div>
+            <input value={profileName} onChange={e => setProfileName(e.target.value)} placeholder="Your name" style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 10 }} />
+          </div>
+
+          {/* Password — only for credentials users */}
+          {!session?.user?.image?.includes('google') && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', letterSpacing: '0.1em' }}>CHANGE PASSWORD</div>
+              <input value={profilePassword} onChange={e => setProfilePassword(e.target.value)} placeholder="Current password" type="password" style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 10 }} />
+              <input value={profileNewPassword} onChange={e => setProfileNewPassword(e.target.value)} placeholder="New password" type="password" style={{ width: '100%', padding: '11px 14px', fontSize: 14, borderRadius: 10 }} />
+            </div>
+          )}
+
+          {profileError && <div style={{ fontSize: 13, color: 'var(--red)' }}>{profileError}</div>}
+          {profileSuccess && <div style={{ fontSize: 13, color: 'var(--accent)' }}>Saved!</div>}
+
+          <div style={{ display: 'flex', gap: 12, padding: '12px 0', borderTop: '1px solid var(--border)' }}>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--accent)' }}>🔥 {streak}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Current streak</div>
+            </div>
+            <div style={{ flex: 1, textAlign: 'center' }}>
+              <div style={{ fontSize: 22, fontWeight: 800, color: 'var(--text-muted)' }}>⭐ {longestStreak}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-dim)', marginTop: 2 }}>Longest streak</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => signOut()} style={{ padding: '11px 16px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 10, fontSize: 13, color: 'var(--text-muted)', fontFamily: 'var(--font-display)', cursor: 'pointer' }}>
+              Sign out
+            </button>
+            <button onClick={saveProfile} disabled={profileSaving} style={{ flex: 1, padding: 11, background: 'var(--accent)', color: '#0c0c0e', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-display)', cursor: profileSaving ? 'not-allowed' : 'pointer', opacity: profileSaving ? 0.7 : 1 }}>
+              {profileSaving ? 'Saving...' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    {streakLost && (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 20px' }}>
+        <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 16, padding: '28px 24px', maxWidth: 360, width: '100%', display: 'flex', flexDirection: 'column', gap: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 40 }}>😔</div>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 6 }}>Streak lost</div>
+            <div style={{ fontSize: 14, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              Your {prevStreak}-day streak ended. Don't worry — start fresh today and build it back up!
+            </div>
+          </div>
+          <button onClick={() => setStreakLost(false)} style={{ padding: '12px', background: 'var(--accent)', color: '#0c0c0e', border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 700, fontFamily: 'var(--font-display)', cursor: 'pointer' }}>
+            Let's go 💪
+          </button>
+        </div>
+      </div>
+    )}
     <SupportWall />
     </>
   )

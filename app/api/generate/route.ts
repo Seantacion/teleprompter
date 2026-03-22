@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { saveScript } from '@/lib/kv'
+import { redis, saveScript } from '@/lib/kv'
 import { randomUUID } from 'crypto'
+import { getServerSession } from 'next-auth'
+import { authOptions } from '@/lib/auth'
+
 
 const CATEGORIES: Record<string, string> = {
   introduction: 'a self-introduction for an English learner. The speaker introduces their name, what they do, why they are learning English, and what their goal is. Keep it grounded and relatable — not poetic or abstract.',
@@ -26,7 +29,26 @@ const LEVEL_NOTES: Record<string, string> = {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await getServerSession(authOptions)
+  const userId = session?.user?.id ?? req.headers.get('x-forwarded-for') ?? 'guest'
+  const role = session?.user?.role ?? 'guest'
+  const limit = role === 'admin' ? Infinity : role === 'user' ? 25 : 5
   const { category, customPrompt, level } = await req.json()
+
+  // cek usage hari ini
+  const today = new Date().toISOString().slice(0, 10)
+  const usageKey = `usage:${userId}:${today}`
+  const usage = parseInt((await redis.get(usageKey)) ?? '0')
+
+  if (usage >= limit) {
+    return NextResponse.json({
+      script: role === 'guest'
+        ? 'Daily limit reached (5/day). Sign in to get 25 generations per day.'
+        : 'Daily limit reached (25/day).',
+    }, { status: 429 })
+  }
+
+  await redis.set(usageKey, String(usage + 1), 'EX', 86400)
 
   const levelNote = LEVEL_NOTES[level] ?? LEVEL_NOTES.intermediate
   const categoryDesc = category === 'custom'
@@ -87,6 +109,7 @@ Requirements:
       category,
       level,
       createdAt: Date.now(),
+      userName: session?.user?.name ?? 'Anonymous',
     })
   } catch (e) {
     console.error('KV save failed:', e)

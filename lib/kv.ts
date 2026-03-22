@@ -9,6 +9,7 @@ export type ScriptEntry = {
   level: string
   createdAt: number
   useCount: number
+  userName?: string
 }
 
 export async function saveScript(entry: Omit<ScriptEntry, 'useCount'>): Promise<void> {
@@ -60,3 +61,5 @@ export async function getScripts(category: string, level: string): Promise<Scrip
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 50)
 }
+
+export { redis }
